@@ -1,0 +1,62 @@
+# CCGit Tool Configuration
+# ─────────────────────────────────────────────────────────────────
+# Copy this file and adjust values before running a migration.
+# Do NOT commit credentials or real paths to source control.
+# ─────────────────────────────────────────────────────────────────
+
+clearcase:
+  # Full path to your ClearCase view root
+  view_path: /views/dev_view
+
+  # Full path to the VOB you want to migrate
+  vob_path: /vobs/project_vob
+
+  # Optional: specific baseline/label to export (e.g. REL_1)
+  # Leave blank or omit to export the latest snapshot
+  baseline: ""
+
+git:
+  # Directory where the new Git repository will be created
+  output_dir: /repos/output
+
+migration:
+  # Name for the output Git repository folder
+  repo_name: migrated_repo
+
+  # Preview mode — log what would happen without writing any files
+  dry_run: false
+
+  # Run file-count validation after migration
+  validate: true
+
+  # Convert ClearCase labels to Git tags
+  preserve_tags: false
+
+  # Enable MD5 checksum verification (slower, more thorough)
+  checksums: false
+
+  # File extensions to exclude from migration (e.g. compiled artifacts)
+  exclude_extensions:
+    - .class
+    - .pyc
+    - .o
+    - .so
+    - .a
+    - .lib
+    - .dll
+    - .exe
+
+  # Path prefixes to exclude entirely
+  exclude_paths: []
+    # - /vobs/project_vob/build/
+    # - /vobs/project_vob/dist/
+
+# Optional: map ClearCase usernames to Git author info
+# Uncomment and populate as needed
+author_map: {}
+  # jsmith:
+  #   name: John Smith
+  #   email: john.smith@sce.com
+  # mjones:
+  #   name: Mary Jones
+  #   email: mary.jones@sce.com

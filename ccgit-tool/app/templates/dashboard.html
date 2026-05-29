@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Migration Dashboard</h1>
+  <a href="{{ url_for('migration.migration_form') }}" class="btn btn-primary">+ New Migration</a>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">Total Migrations</span>
+    <span class="stat-value">{{ recent_migrations | length }}</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">Successful</span>
+    <span class="stat-value success">{{ recent_migrations | selectattr('success') | list | length }}</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">Failed</span>
+    <span class="stat-value danger">{{ recent_migrations | rejectattr('success') | list | length }}</span>
+  </div>
+</div>
+
+<section class="card">
+  <h2>Recent Migrations</h2>
+  {% if recent_migrations %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Repo</th>
+          <th>Baseline</th>
+          <th>Files</th>
+          <th>Status</th>
+          <th>Timestamp</th>
+          <th>Report</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in recent_migrations %}
+        <tr>
+          <td>{{ m.repo_name | default('—') }}</td>
+          <td>{{ m.baseline | default('—') }}</td>
+          <td>{{ m.files_migrated | default(0) }}</td>
+          <td>
+            {% if m.success %}
+              <span class="badge badge-success">Success</span>
+            {% else %}
+              <span class="badge badge-danger">Failed</span>
+            {% endif %}
+          </td>
+          <td>{{ m.timestamp | default('—') }}</td>
+          <td>
+            {% if m.log_path %}
+              <a href="/migration/logs/{{ m.log_path | basename }}" target="_blank" class="link">View Log</a>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="empty-state">
+      <p>No migrations yet. <a href="{{ url_for('migration.migration_form') }}">Start your first migration →</a></p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}
