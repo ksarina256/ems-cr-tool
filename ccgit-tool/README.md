@@ -1,5 +1,5 @@
 # CCGit Tool — ClearCase to Git Migration Utility
-A lightweight migration utility that exports ClearCase VOBs into clean Git repositories. Built as an intern project to support the team's eventual transition from ClearCase to GitHub Enterprise.
+A lightweight migration utility that exports ClearCase VOBs into clean Git repositories.
 
 ---
 
