@@ -1,4 +1,66 @@
-# cc-to-git for migration
+# cc-to-git / ccgit
+
+This repo now contains two paths:
+
+1. `ccgit`: a Python 3 ClearCase snapshot mirror for team comparisons in Git/Gitea.
+2. Legacy `cc-to-git`: the original Python 2 history migration script preserved below.
+
+## Team Snapshot Mirror
+
+The recommended team workflow is to run `ccgit` on the ClearCase/build server, snapshot the configured ClearCase master/dev views into Git branches, push those branches to Gitea, and let teammates compare files in Gitea.
+
+Typical flow:
+
+```text
+ClearCase master view -> cc-master branch -> Gitea
+ClearCase dev view    -> cc-dev branch    -> Gitea
+```
+
+Then compare:
+
+```text
+cc-master vs cc-dev
+cc-master vs another Git branch
+cc-dev vs another Git branch
+```
+
+### Quick Start
+
+Copy the example config and edit the ClearCase view names, VOB path, local mirror repo, and Gitea remote:
+
+```bash
+cp ccgit.example.json ccgit.json
+python3 -m ccgit.cli --config ccgit.json validate
+```
+
+Refresh snapshots:
+
+```bash
+python3 -m ccgit.cli --config ccgit.json snapshot master --push
+python3 -m ccgit.cli --config ccgit.json snapshot dev --push
+```
+
+Compare snapshots:
+
+```bash
+python3 -m ccgit.cli --config ccgit.json compare --base master --target dev --write
+```
+
+Run the web UI:
+
+```bash
+python3 -m ccgit.cli --config ccgit.json web --host 0.0.0.0 --port 8080
+```
+
+Run tests:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_ccgit*.py'
+```
+
+See `docs/PROJECT_SCOPE.md` for the project scope, rollout model, and known V1 limitations.
+
+## Legacy cc-to-git for migration
 
 Hi, this fork of git-cc focus on migrating from ClearCase to Git. It is compiled to
 support migration of one ClearCase view with multiple branches into a new Git repository.
@@ -187,4 +249,3 @@ inside the view you've specified.
 3. fatal: ambiguous argument 'clearcase': unknown revision or path not in the working tree.
 
 If this is your first rebase then please ignore this. This is expected.
-

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ccgit"
+version = "0.1.0"
+description = "ClearCase view snapshot mirror and comparison tool for Git/Gitea"
+requires-python = ">=3.9"
+readme = "README.md"
+
+[project.scripts]
+ccgit = "ccgit.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ccgit*"]
