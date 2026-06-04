@@ -1,0 +1,32 @@
+{
+  "project": "sce",
+  "local_repo": "/opt/ccgit/sce-clearcase-mirror",
+  "gitea_repo": "git@gitea.company.example:team/sce-clearcase-mirror.git",
+  "gitea_web_url": "https://gitea.company.example/team/sce-clearcase-mirror",
+  "default_base": "master",
+  "default_target": "dev",
+  "branches": {
+    "master": {
+      "description": "Current visible files from the ClearCase master view",
+      "view": "sce_master",
+      "copy_mode": "setview",
+      "source_path": "/vobs/PROJ",
+      "git_branch": "cc-master"
+    },
+    "dev": {
+      "description": "Current visible files from the ClearCase dev view",
+      "view": "sce_dts",
+      "copy_mode": "setview",
+      "source_path": "/vobs/PROJ",
+      "git_branch": "cc-dev"
+    }
+  },
+  "exclude": [
+    "bin/",
+    "build/",
+    "derived/",
+    "*.o",
+    "*.obj",
+    "*.log"
+  ]
+}

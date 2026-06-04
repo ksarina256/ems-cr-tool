@@ -2,5 +2,3 @@ users.py
 *.pyc
 .idea
 nbproject
-ccgit.json
-.ccgit-work/
