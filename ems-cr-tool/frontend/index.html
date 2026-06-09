@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EMS CR Validation Tool</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f5; color: #111; font-size: 14px; }
+  a { color: #185FA5; }
+  input, select, textarea {
+    border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px;
+    font-size: 12px; font-family: inherit; background: #fff; color: #111;
+    outline: none; width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #185FA5; box-shadow: 0 0 0 3px rgba(24,95,165,0.12); }
+  button {
+    border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 14px;
+    font-size: 12px; font-family: inherit; background: #fff; color: #111;
+    cursor: pointer; transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+  }
+  button:hover { background: #f3f4f6; border-color: #9ca3af; }
+  button.primary { background: #185FA5; color: #fff; border-color: #185FA5; font-weight: 600; }
+  button.primary:hover { background: #1450880; }
+  button.danger { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ── API helpers ─────────────────────────────────────── */
+const api = {
+  get: (url) => fetch(url).then(r => r.json()),
+  post: (url, body) => fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(r => r.json()),
+  postForm: (url, formData) => fetch(url, { method: "POST", body: formData }).then(r => r.json()),
+  delete: (url) => fetch(url, { method: "DELETE" }).then(r => r.json()),
+};
+
+/* ── Small reusable components ───────────────────────── */
+function Badge({ label, color, bg }) {
+  return <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: bg, color, display: "inline-block", whiteSpace: "nowrap" }}>{label}</span>;
+}
+
+const STATUS_CFG = {
+  modified: { label: "Modified", color: "#185FA5", bg: "#dbeafe", icon: "M" },
+  added:    { label: "Added",    color: "#065f46", bg: "#d1fae5", icon: "A" },
+  removed:  { label: "Removed",  color: "#991b1b", bg: "#fee2e2", icon: "R" },
+  missing:  { label: "Missing CR",color: "#92400e", bg: "#fef3c7", icon: "!" },
+};
+const CR_CFG = {
+  present: { label: "Present", color: "#065f46", bg: "#d1fae5" },
+  partial: { label: "Partial",  color: "#92400e", bg: "#fef3c7" },
+  missing: { label: "Missing",  color: "#991b1b", bg: "#fee2e2" },
+};
+
+/* ── Diff viewer ─────────────────────────────────────── */
+function DiffViewer({ file, mode }) {
+  if (!file) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 300, color: "#9ca3af", fontSize: 13 }}>
+      Select a file from the list to view its diff
+    </div>
+  );
+
+  const diff = file.diff || [];
+  const bg   = { added: "#f0fff4", removed: "#fff5f5", context: "transparent" };
+  const tc   = { added: "#065f46", removed: "#7f1d1d", context: "#111" };
+  const lc   = { added: "#6ee7b7", removed: "#fca5a5", context: "#d1d5db" };
+  const sc   = STATUS_CFG[file.status] || STATUS_CFG.modified;
+
+  return (
+    <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+      {/* file header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+        <Badge label={sc.label} color={sc.color} bg={sc.bg} />
+        <code style={{ fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.path}</code>
+        {file.cr && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "#ede9fe", color: "#4c1d95" }}>{file.cr}</span>}
+        {file.crs && file.crs.length > 1 && file.crs.slice(1).map(cr => (
+          <span key={cr} style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "#ede9fe", color: "#4c1d95" }}>{cr}</span>
+        ))}
+        <span style={{ fontSize: 11, color: "#059669" }}>+{file.linesAdded}</span>
+        <span style={{ fontSize: 11, color: "#dc2626" }}>-{file.linesRemoved}</span>
+      </div>
+
+      {!file.isText ? (
+        <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 12 }}>Binary file — diff not available</div>
+      ) : diff.length === 0 ? (
+        <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 12 }}>
+          {file.status === "missing" ? "File exists in EMS source but is absent from Gitea refresh." : "No diff content available."}
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto", maxHeight: 500 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+            <tbody>
+              {diff.map((line, i) => {
+                const prefix = line.type === "added" ? "+" : line.type === "removed" ? "-" : " ";
+                if (mode === "side-by-side") {
+                  const isL = line.type === "removed" || line.type === "context";
+                  const isR = line.type === "added"   || line.type === "context";
+                  return (
+                    <tr key={i} style={{ background: line.type !== "context" ? bg[line.type] : "transparent" }}>
+                      <td style={{ width: 32, padding: "1px 6px", fontSize: 10, color: lc[line.type], textAlign: "right", fontFamily: "monospace", borderRight: "1px solid #f3f4f6" }}>{isL ? line.lineA : ""}</td>
+                      <td style={{ padding: "1px 10px", fontSize: 11, fontFamily: "monospace", color: line.type === "removed" ? tc.removed : tc.context, width: "47%", borderRight: "1px solid #e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{isL ? line.content : ""}</td>
+                      <td style={{ width: 32, padding: "1px 6px", fontSize: 10, color: lc[line.type], textAlign: "right", fontFamily: "monospace", borderRight: "1px solid #f3f4f6" }}>{isR ? line.lineB : ""}</td>
+                      <td style={{ padding: "1px 10px", fontSize: 11, fontFamily: "monospace", color: line.type === "added" ? tc.added : tc.context, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{isR ? line.content : ""}</td>
+                    </tr>
+                  );
+                }
+                return (
+                  <tr key={i} style={{ background: bg[line.type] }}>
+                    <td style={{ width: 30, padding: "1px 5px", fontSize: 10, color: lc[line.type], textAlign: "right", fontFamily: "monospace", userSelect: "none" }}>{line.lineA || ""}</td>
+                    <td style={{ width: 30, padding: "1px 5px", fontSize: 10, color: lc[line.type], textAlign: "right", fontFamily: "monospace", userSelect: "none" }}>{line.lineB || ""}</td>
+                    <td style={{ width: 12, padding: "1px 4px", fontSize: 10, color: lc[line.type], fontFamily: "monospace", userSelect: "none" }}>{prefix}</td>
+                    <td style={{ padding: "1px 10px", fontSize: 11, fontFamily: "monospace", color: tc[line.type], overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.content}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Upload zone ─────────────────────────────────────── */
+function UploadZone({ side, hasFiles, onUpload, onClear }) {
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [msg, setMsg] = useState("");
+  const inputRef = useRef();
+
+  const handleFile = async (file) => {
+    if (!file || !file.name.endsWith(".zip")) {
+      setMsg("Please select a .zip file");
+      return;
+    }
+    setUploading(true);
+    setMsg("Uploading and extracting...");
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await api.postForm(`/api/upload/${side}`, fd);
+      if (res.success) {
+        setMsg(`✓ ${res.fileCount} files loaded`);
+        onUpload();
+      } else {
+        setMsg(`Error: ${res.error}`);
+      }
+    } catch (e) {
+      setMsg("Upload failed");
+    }
+    setUploading(false);
+  };
+
+  const label = side === "clearcase" ? "ClearCase Snapshot" : "Gitea Clone Snapshot";
+  const color = side === "clearcase" ? "#7c3aed" : "#0369a1";
+  const lightBg = side === "clearcase" ? "#f5f3ff" : "#e0f2fe";
+
+  return (
+    <div style={{ border: `2px dashed ${dragging ? color : "#d1d5db"}`, borderRadius: 10, padding: "1.25rem", background: dragging ? lightBg : "#fafafa", transition: "all 0.15s", textAlign: "center" }}
+      onDragOver={e => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color, marginBottom: 6 }}>{label}</div>
+      {hasFiles ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "#059669", fontWeight: 500 }}>✓ Snapshot loaded</span>
+          <button onClick={onClear} className="danger" style={{ fontSize: 11, padding: "2px 8px" }}>Clear</button>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10 }}>Drag & drop a .zip file, or click to browse</div>
+          <button onClick={() => inputRef.current.click()} style={{ fontSize: 11, padding: "4px 14px" }} disabled={uploading}>
+            {uploading ? "Uploading..." : "Browse .zip"}
+          </button>
+        </>
+      )}
+      {msg && <div style={{ fontSize: 11, color: msg.startsWith("✓") ? "#059669" : "#dc2626", marginTop: 8 }}>{msg}</div>}
+      <input ref={inputRef} type="file" accept=".zip" style={{ display: "none" }} onChange={e => handleFile(e.target.files[0])} />
+    </div>
+  );
+}
+
+/* ── Main App ────────────────────────────────────────── */
+function App() {
+  const [view, setView]               = useState("setup"); // setup | running | results
+  const [inputs, setInputs]           = useState({ clearcase: false, gitea: false });
+  const [runStatus, setRunStatus]     = useState({ state: "idle", message: "", progress: 0 });
+  const [results, setResults]         = useState(null);
+  const [mappings, setMappings]       = useState({});
+  const [newCR, setNewCR]             = useState({ id: "", files: "" });
+  const [showCRForm, setShowCRForm]   = useState(false);
+  const [activeTab, setActiveTab]     = useState("files");
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [diffMode, setDiffMode]       = useState("unified");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterCR, setFilterCR]       = useState("all");
+  const [search, setSearch]           = useState("");
+  const [error, setError]             = useState("");
+  const pollRef = useRef(null);
+
+  /* load initial state */
+  useEffect(() => {
+    loadInputs();
+    loadMappings();
+    checkForExistingResults();
+  }, []);
+
+  const loadInputs = async () => {
+    try { setInputs(await api.get("/api/inputs")); } catch {}
+  };
+  const loadMappings = async () => {
+    try { setMappings(await api.get("/api/mappings")); } catch {}
+  };
+  const checkForExistingResults = async () => {
+    try {
+      const r = await api.get("/api/results");
+      if (!r.error) { setResults(r); setView("results"); setSelectedFile(r.files?.[0] || null); }
+    } catch {}
+  };
+
+  /* poll run status while running */
+  const startPolling = () => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await api.get("/api/status");
+        setRunStatus(s);
+        if (s.state === "complete") {
+          clearInterval(pollRef.current);
+          const r = await api.get("/api/results");
+          setResults(r);
+          setSelectedFile(r.files?.[0] || null);
+          setView("results");
+          setActiveTab("files");
+        } else if (s.state === "error") {
+          clearInterval(pollRef.current);
+          setError(s.message);
+          setView("setup");
+        }
+      } catch {}
+    }, 800);
+  };
+
+  const handleRunComparison = async () => {
+    setError("");
+    const res = await api.post("/api/run", {});
+    if (res.error) { setError(res.error); return; }
+    setView("running");
+    setRunStatus({ state: "running", message: "Starting...", progress: 0 });
+    startPolling();
+  };
+
+  const handleClearInput = async (side) => {
+    await api.post(`/api/clear/${side}`, {});
+    loadInputs();
+  };
+
+  const handleSaveMappings = async (updated) => {
+    await api.post("/api/mappings", updated);
+    setMappings(updated);
+  };
+
+  const handleAddCR = async () => {
+    if (!newCR.id.trim() || !newCR.files.trim()) return;
+    const files = newCR.files.split("\n").map(f => f.trim()).filter(Boolean);
+    const updated = { ...mappings, [newCR.id.trim()]: files };
+    await handleSaveMappings(updated);
+    setNewCR({ id: "", files: "" });
+    setShowCRForm(false);
+  };
+
+  const handleDeleteCR = async (crId) => {
+    const updated = { ...mappings };
+    delete updated[crId];
+    await handleSaveMappings(updated);
+  };
+
+  const handleExport = async (fmt) => {
+    if (fmt === "json") {
+      const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "ems_cr_comparison.json"; a.click();
+      return;
+    }
+    if (fmt === "csv") {
+      const rows = [["File Path","Status","CRs","Lines Added","Lines Removed"]];
+      (results.files || []).forEach(f => {
+        rows.push([f.path, f.status, (f.crs||[]).join(";"), f.linesAdded, f.linesRemoved]);
+      });
+      const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "ems_cr_comparison.csv"; a.click();
+      return;
+    }
+    alert(`${fmt.toUpperCase()} export: connect the Flask export endpoint in production.`);
+  };
+
+  /* filtered file list */
+  const allFiles = results?.files || [];
+  const allCRs = Object.keys(mappings);
+  const filteredFiles = allFiles.filter(f => {
+    if (filterStatus !== "all" && f.status !== filterStatus) return false;
+    if (filterCR === "none" && f.cr) return false;
+    if (filterCR !== "all" && filterCR !== "none" && f.cr !== filterCR) return false;
+    if (search && !f.path.toLowerCase().includes(search.toLowerCase()) && !(f.cr||"").toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  const sum = results?.summary || {};
+
+  /* ── SETUP VIEW ── */
+  if (view === "setup") return (
+    <div style={{ maxWidth: 760, margin: "0 auto", padding: "2rem 1rem" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>EMS CR Validation Tool</h1>
+      <p style={{ fontSize: 13, color: "#6b7280", marginBottom: "1.5rem" }}>Compare EMS ClearCase source against Gitea base refresh · Validate CR preservation</p>
+
+      {error && <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", marginBottom: "1rem", fontSize: 13, color: "#991b1b" }}>{error}</div>}
+
+      {/* Upload zones */}
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1.25rem", marginBottom: "1rem" }}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Step 1 — Load Snapshots</div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>
+          Export each codebase as a <code>.zip</code> file from the jump boxes in Citrix, then upload them here.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <UploadZone side="clearcase" hasFiles={inputs.clearcase} onUpload={loadInputs} onClear={() => handleClearInput("clearcase")} />
+          <UploadZone side="gitea"     hasFiles={inputs.gitea}     onUpload={loadInputs} onClear={() => handleClearInput("gitea")} />
+        </div>
+      </div>
+
+      {/* CR Mappings */}
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1.25rem", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Step 2 — CR Mappings <span style={{ fontSize: 12, fontWeight: 400, color: "#6b7280" }}>({Object.keys(mappings).length} configured)</span></div>
+          <button onClick={() => setShowCRForm(v => !v)} style={{ fontSize: 11 }}>{showCRForm ? "Cancel" : "+ Add CR"}</button>
+        </div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+          Map CR identifiers to the files they affect. The tool also auto-detects CRs from code comments like <code># CR-1042: ...</code>
+        </div>
+
+        {showCRForm && (
+          <div style={{ background: "#f9fafb", borderRadius: 8, padding: 12, marginBottom: 12, border: "1px solid #e5e7eb" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>CR Identifier</div>
+                <input value={newCR.id} onChange={e => setNewCR(p => ({...p, id: e.target.value}))} placeholder="CR-1042" />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>File paths (one per line)</div>
+                <textarea value={newCR.files} onChange={e => setNewCR(p => ({...p, files: e.target.value}))} rows={3} placeholder="src/ems/billing/invoice_calc.py" style={{ resize: "vertical" }} />
+              </div>
+            </div>
+            <button onClick={handleAddCR} className="primary" style={{ marginTop: 8, fontSize: 11 }}>Save</button>
+          </div>
+        )}
+
+        {Object.keys(mappings).length === 0 ? (
+          <div style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic" }}>No mappings configured — CRs will be auto-detected from code comments.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {Object.entries(mappings).map(([cr, files]) => (
+              <div key={cr} style={{ background: "#f9fafb", borderRadius: 7, padding: "8px 10px", border: "1px solid #e5e7eb" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#4c1d95" }}>{cr}</span>
+                  <button onClick={() => handleDeleteCR(cr)} style={{ fontSize: 10, padding: "1px 6px", color: "#dc2626", border: "none", background: "none", cursor: "pointer" }}>✕</button>
+                </div>
+                {files.map(f => <div key={f} style={{ fontSize: 10, color: "#6b7280", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</div>)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Run button */}
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1.25rem" }}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Step 3 — Run Comparison</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <button className="primary" onClick={handleRunComparison}
+            disabled={!inputs.clearcase || !inputs.gitea}
+            style={{ fontSize: 13, padding: "8px 28px", opacity: (!inputs.clearcase || !inputs.gitea) ? 0.5 : 1 }}>
+            Run Comparison →
+          </button>
+          <span style={{ fontSize: 11, color: "#9ca3af" }}>
+            {!inputs.clearcase && !inputs.gitea ? "Upload both snapshots to continue" :
+             !inputs.clearcase ? "Upload ClearCase snapshot to continue" :
+             !inputs.gitea     ? "Upload Gitea snapshot to continue" :
+             "Read-only mode · no files will be modified"}
+          </span>
+        </div>
+        {results && (
+          <div style={{ marginTop: 10 }}>
+            <button onClick={() => { setView("results"); }} style={{ fontSize: 11, color: "#185FA5", border: "none", background: "none", cursor: "pointer", padding: 0 }}>
+              ← View last results ({results.meta?.timestamp?.split("T")[0]})
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  /* ── RUNNING VIEW ── */
+  if (view === "running") return (
+    <div style={{ maxWidth: 480, margin: "5rem auto", padding: "2rem", textAlign: "center", background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb" }}>
+      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Running Comparison</div>
+      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 24, minHeight: 18 }}>{runStatus.message}</div>
+      <div style={{ background: "#f3f4f6", borderRadius: 99, height: 8, overflow: "hidden", marginBottom: 10 }}>
+        <div style={{ height: "100%", width: `${runStatus.progress}%`, background: "#185FA5", borderRadius: 99, transition: "width 0.5s ease" }} />
+      </div>
+      <div style={{ fontSize: 12, color: "#9ca3af" }}>{runStatus.progress}%</div>
+    </div>
+  );
+
+  /* ── RESULTS VIEW ── */
+  const crStatus = results?.crStatus || {};
+
+  return (
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "1.5rem 1rem" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: "1.25rem", flexWrap: "wrap" }}>
+        <div style={{ flex: 1 }}>
+          <h1 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 2px" }}>Comparison Results</h1>
+          <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "monospace" }}>
+            {results?.meta?.sourcePath} → {results?.meta?.targetPath} · {results?.meta?.timestamp?.replace("T"," ").split(".")[0]}
+          </div>
+        </div>
+        <button onClick={() => setView("setup")} style={{ fontSize: 12 }}>← New Run</button>
+        <button onClick={() => handleExport("json")} style={{ fontSize: 12 }}>Export JSON</button>
+        <button onClick={() => handleExport("csv")}  style={{ fontSize: 12 }}>Export CSV</button>
+      </div>
+
+      {/* Metrics */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8, marginBottom: "1.25rem" }}>
+        {[
+          ["Total",     sum.total,        "#111"],
+          ["Modified",  sum.changed,      "#1d4ed8"],
+          ["Added",     sum.added,        "#065f46"],
+          ["Removed",   sum.removed,      "#991b1b"],
+          ["CRs ✓",     sum.crs_present,  "#065f46"],
+          ["CRs ~",     sum.crs_partial,  "#92400e"],
+          ["CRs ✗",     sum.crs_missing,  "#991b1b"],
+        ].map(([l,v,c]) => (
+          <div key={l} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px", textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 3 }}>{l}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: c }}>{v ?? "—"}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb", marginBottom: "1.25rem" }}>
+        {[["files","File Diffs"],["crs","CR Status"],["report","Report Summary"]].map(([id,label]) => (
+          <button key={id} onClick={() => setActiveTab(id)} style={{
+            fontSize: 13, padding: "8px 20px", background: "none", border: "none", cursor: "pointer",
+            color: activeTab===id ? "#111" : "#6b7280", fontWeight: activeTab===id ? 700 : 400,
+            borderBottom: activeTab===id ? "2px solid #185FA5" : "2px solid transparent", marginBottom: -1,
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* ── FILES TAB ── */}
+      {activeTab === "files" && (
+        <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search files or CRs…" style={{ width: 200, fontSize: 12 }} />
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
+              <option value="all">All statuses</option>
+              <option value="modified">Modified</option>
+              <option value="added">Added</option>
+              <option value="removed">Removed</option>
+            </select>
+            <select value={filterCR} onChange={e => setFilterCR(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
+              <option value="all">All CRs</option>
+              {[...new Set(allFiles.map(f => f.cr).filter(Boolean))].map(cr => <option key={cr} value={cr}>{cr}</option>)}
+              <option value="none">No CR tag</option>
+            </select>
+            <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 4 }}>{filteredFiles.length} file{filteredFiles.length !== 1 ? "s" : ""}</span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              {["unified","side-by-side"].map(m => (
+                <button key={m} onClick={() => setDiffMode(m)} style={{
+                  fontSize: 11, padding: "3px 10px",
+                  background: diffMode===m ? "#dbeafe" : "#fff",
+                  color: diffMode===m ? "#1d4ed8" : "#6b7280",
+                  border: `1px solid ${diffMode===m ? "#93c5fd" : "#e5e7eb"}`, borderRadius: 5,
+                }}>{m}</button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 12 }}>
+            {/* File list */}
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+              <div style={{ padding: "6px 10px", background: "#f9fafb", fontSize: 10, color: "#9ca3af", borderBottom: "1px solid #e5e7eb", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Files
+              </div>
+              <div style={{ maxHeight: 520, overflowY: "auto" }}>
+                {filteredFiles.length === 0 && (
+                  <div style={{ padding: 20, textAlign: "center", color: "#9ca3af", fontSize: 12 }}>No files match filters</div>
+                )}
+                {filteredFiles.map(f => {
+                  const sc = STATUS_CFG[f.status] || STATUS_CFG.modified;
+                  const sel = selectedFile?.id === f.id;
+                  return (
+                    <div key={f.id} onClick={() => setSelectedFile(f)} style={{
+                      padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #f3f4f6",
+                      background: sel ? "#eff6ff" : "transparent",
+                      borderLeft: sel ? "3px solid #185FA5" : "3px solid transparent",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: sc.bg, color: sc.color, minWidth: 14, textAlign: "center" }}>{sc.icon}</span>
+                        <code style={{ fontSize: 10, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                          {f.path.split("/").slice(-1)[0]}
+                        </code>
+                      </div>
+                      <div style={{ fontSize: 9, color: "#9ca3af", marginTop: 1, paddingLeft: 20, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {f.path.split("/").slice(0,-1).join("/")}
+                      </div>
+                      <div style={{ display: "flex", gap: 4, marginTop: 3, paddingLeft: 20, flexWrap: "wrap" }}>
+                        {(f.crs||[]).map(cr => <span key={cr} style={{ fontSize: 9, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: "#ede9fe", color: "#4c1d95" }}>{cr}</span>)}
+                        <span style={{ fontSize: 9, color: "#059669" }}>+{f.linesAdded}</span>
+                        <span style={{ fontSize: 9, color: "#dc2626" }}>-{f.linesRemoved}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Diff viewer */}
+            <DiffViewer file={selectedFile} mode={diffMode} />
+          </div>
+        </div>
+      )}
+
+      {/* ── CR STATUS TAB ── */}
+      {activeTab === "crs" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {Object.entries(crStatus).map(([crId, info]) => {
+            const sc = CR_CFG[info.status] || CR_CFG.missing;
+            return (
+              <div key={crId} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "1rem 1.1rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{crId}</span>
+                  <Badge label={sc.label} color={sc.color} bg={sc.bg} />
+                  <span style={{ marginLeft: "auto", fontSize: 10, color: "#9ca3af" }}>+{info.totalLinesAdded} -{info.totalLinesRemoved}</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>
+                  {info.mappedFiles.length} mapped · {info.relatedFiles.length} files with diffs
+                </div>
+                {[...new Set([...info.mappedFiles, ...info.relatedFiles])].map(fp => {
+                  const rf = allFiles.find(f => f.path === fp || f.path.endsWith(fp));
+                  const fsc = rf ? STATUS_CFG[rf.status] : null;
+                  return (
+                    <div key={fp} onClick={() => { if (rf) { setSelectedFile(rf); setActiveTab("files"); } }}
+                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", borderTop: "1px solid #f3f4f6", cursor: rf ? "pointer" : "default" }}>
+                      {fsc
+                        ? <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: fsc.bg, color: fsc.color }}>{fsc.icon}</span>
+                        : <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "#fee2e2", color: "#991b1b" }}>!</span>}
+                      <code style={{ fontSize: 10, color: rf ? "#185FA5" : "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fp}</code>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+          {Object.keys(crStatus).length === 0 && (
+            <div style={{ gridColumn: "1/-1", textAlign: "center", color: "#9ca3af", fontSize: 13, padding: "2rem" }}>
+              No CRs detected. Add CR mappings or ensure CR tags like <code># CR-1042</code> exist in your code.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── REPORT TAB ── */}
+      {activeTab === "report" && (
+        <div>
+          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "1.1rem", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Run Details</div>
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              {[
+                ["Comparison date", results?.meta?.timestamp?.replace("T"," ").split(".")[0]],
+                ["EMS ClearCase source", results?.meta?.sourcePath],
+                ["Gitea base target", results?.meta?.targetPath],
+                ["Total files scanned", results?.meta?.totalScanned],
+                ["Identical files (skipped)", results?.meta?.identicalFiles],
+                ["Binary files (skipped)", results?.meta?.binaryFilesSkipped],
+                ["Files modified", sum.changed],
+                ["Files added (new in base)", sum.added],
+                ["Files removed (absent in base)", sum.removed],
+                ["CRs fully present", sum.crs_present],
+                ["CRs partially present", sum.crs_partial],
+                ["CRs missing from base", sum.crs_missing],
+              ].map(([k,v]) => (
+                <tr key={k} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: "5px 0", color: "#6b7280", width: "45%" }}>{k}</td>
+                  <td style={{ padding: "5px 0", fontWeight: 600 }}>{String(v ?? "—")}</td>
+                </tr>
+              ))}
+            </table>
+          </div>
+
+          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "1.1rem", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>CR Summary</div>
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  {["CR","Status","Mapped Files","Files w/ Diffs","+Lines","-Lines"].map(h => (
+                    <th key={h} style={{ padding: "4px 8px", textAlign: "left", fontWeight: 600, color: "#9ca3af", fontSize: 10 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(crStatus).map(([crId, info]) => {
+                  const sc = CR_CFG[info.status] || CR_CFG.missing;
+                  return (
+                    <tr key={crId} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: "5px 8px", fontWeight: 700, color: "#4c1d95" }}>{crId}</td>
+                      <td style={{ padding: "5px 8px" }}><Badge label={sc.label} color={sc.color} bg={sc.bg} /></td>
+                      <td style={{ padding: "5px 8px" }}>{info.mappedFiles.length}</td>
+                      <td style={{ padding: "5px 8px" }}>{info.relatedFiles.length}</td>
+                      <td style={{ padding: "5px 8px", color: "#059669", fontFamily: "monospace" }}>+{info.totalLinesAdded}</td>
+                      <td style={{ padding: "5px 8px", color: "#dc2626", fontFamily: "monospace" }}>-{info.totalLinesRemoved}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "1.1rem", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>All Changed Files</div>
+            <div style={{ maxHeight: 400, overflowY: "auto" }}>
+              <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+                <thead style={{ position: "sticky", top: 0, background: "#fff" }}>
+                  <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                    {["File Path","Status","CRs","+Lines","-Lines"].map(h => (
+                      <th key={h} style={{ padding: "4px 8px", textAlign: "left", fontWeight: 600, color: "#9ca3af", fontSize: 10 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {allFiles.map(f => {
+                    const sc = STATUS_CFG[f.status] || STATUS_CFG.modified;
+                    return (
+                      <tr key={f.id} onClick={() => { setSelectedFile(f); setActiveTab("files"); }}
+                        style={{ borderBottom: "1px solid #f9fafb", cursor: "pointer" }}
+                        onMouseEnter={e => e.currentTarget.style.background="#f9fafb"}
+                        onMouseLeave={e => e.currentTarget.style.background=""}>
+                        <td style={{ padding: "5px 8px", fontFamily: "monospace", fontSize: 10, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.path}</td>
+                        <td style={{ padding: "5px 8px" }}><Badge label={sc.label} color={sc.color} bg={sc.bg} /></td>
+                        <td style={{ padding: "5px 8px" }}>{(f.crs||[]).map(cr => <span key={cr} style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "#ede9fe", color: "#4c1d95", marginRight: 3 }}>{cr}</span>)}</td>
+                        <td style={{ padding: "5px 8px", color: "#059669", fontFamily: "monospace" }}>+{f.linesAdded}</td>
+                        <td style={{ padding: "5px 8px", color: "#dc2626", fontFamily: "monospace" }}>-{f.linesRemoved}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => handleExport("json")} style={{ fontSize: 12, padding: "7px 18px" }}>Export JSON</button>
+            <button onClick={() => handleExport("csv")}  style={{ fontSize: 12, padding: "7px 18px" }}>Export CSV</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
